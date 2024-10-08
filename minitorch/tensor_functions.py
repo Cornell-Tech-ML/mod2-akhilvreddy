@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
@@ -84,6 +84,149 @@ class Inv(Function):
         (t1,) = ctx.saved_values
         return grad_output.f.inv_back_zip(t1, grad_output)
 
+class Mul(Function):
+    @staticmethod
+    def forward(ctx: Context, t1: Tensor, t2: Tensor) -> Tensor:
+        return t1.f.mul_zip(t1, t2)
+
+    @staticmethod
+    def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:
+        return grad_output.f.mul_zip(grad_output, ctx.saved_values[1]), grad_output.f.mul_zip(grad_output, ctx.saved_values[0])
+
+class Sigmoid(Function):
+    @staticmethod
+    def forward(ctx: Context, t1: Tensor) -> Tensor:
+        result = t1.f.sigmoid_map(t1)
+        ctx.save_for_backward(result)
+        return result
+
+    @staticmethod
+    def backward(ctx: Context, grad_output: Tensor) -> Tensor:
+        sigmoid_output = ctx.saved_values[0]
+        return grad_output.f.mul_zip(sigmoid_output.f.mul_zip(sigmoid_output, sigmoid_output.f.sub_map(1, sigmoid_output)), grad_output)
+
+class ReLU(Function):
+    @staticmethod
+    def forward(ctx: Context, t1: Tensor) -> Tensor:
+        ctx.save_for_backward(t1)
+        return t1.f.relu_map(t1)
+
+    @staticmethod
+    def backward(ctx: Context, grad_output: Tensor) -> Tensor:
+        t1 = ctx.saved_values[0]
+        return grad_output.f.relu_back_zip(t1, grad_output)
+
+class Log(Function):
+    @staticmethod
+    def forward(ctx: Context, t1: Tensor) -> Tensor:
+        ctx.save_for_backward(t1)
+        return t1.f.log_map(t1)
+
+    # @staticmethod
+    # def backward(ctx: Context, grad_output: Tensor) -> Tensor:
+    #     t1 = ctx.saved_values[0]
+    #     return grad_output.f.div_zip(grad_output, t1)
+
+class Exp(Function):
+    @staticmethod
+    def forward(ctx: Context, t1: Tensor) -> Tensor:
+        result = t1.f.exp_map(t1)
+        ctx.save_for_backward(result)  # Save the result for the backward pass
+        return result
+
+    @staticmethod
+    def backward(ctx: Context, grad_output: Tensor) -> Tensor:
+        exp_output = ctx.saved_values[0]
+        return grad_output.f.mul_zip(exp_output, grad_output)
+
+class Sum(Function):
+    @staticmethod
+    def forward(ctx: Context, t1: Tensor, dim_tensor: Tensor) -> Tensor:
+        dim = int(dim_tensor.item())
+        ctx.save_for_backward(dim_tensor)
+        return t1.f.add_reduce(t1, dim)
+
+    # @staticmethod
+    # def backward(ctx: Context, grad_output: Tensor) -> Tensor:
+    #     dim = ctx.saved_values[0]
+    #     # Expand the grad_output to match the shape of t1 along the reduced dimension
+    #     return grad_output.f.expand_dims(grad_output, dim, ctx.input_shape)
+
+class LT(Function):
+    @staticmethod
+    def forward(ctx: Context, t1: Tensor, t2: Tensor) -> Tensor:
+        return t1.f.lt_zip(t1, t2)
+
+    @staticmethod
+    def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:
+        return grad_output, grad_output
+
+class EQ(Function):
+    @staticmethod
+    def forward(ctx: Context, t1: Tensor, t2: Tensor) -> Tensor:
+        return t1.f.eq_zip(t1, t2)
+
+    @staticmethod
+    def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:
+        return grad_output, grad_output
+
+class IsClose(Function):
+    @staticmethod
+    def forward(ctx: Context, t1: Tensor, t2: Tensor) -> Tensor:
+        return t1.f.is_close_zip(t1, t2)
+
+class Permute(Function):
+    @staticmethod
+    def forward(ctx: Context, t1: Tensor, order_tensor: Tensor) -> Tensor:
+        """Permute the dimensions of the tensor according to the specified order.
+
+        Args:
+            t1 (Tensor): The input tensor.
+            order (List[int]): The desired ordering of dimensions.
+
+        Returns:
+            Tensor: A new tensor with permuted dimensions.
+        """
+        # Save the order for the backward pass
+        order = [int(i) for i in order_tensor]
+
+        ctx.save_for_backward(order)
+
+        # Validate the permutation order
+        assert sorted(order) == list(range(len(t1.shape))), "Invalid permutation order"
+
+        # Compute new shape and strides
+        new_shape = [t1.shape[i] for i in order]
+        new_strides = [t1._tensor.strides[i] for i in order]
+
+        # Create a new Tensor with permuted shape and strides
+        permuted_tensor = Tensor(
+            v=t1._tensor,  # Reuse the same storage as t1
+            back=None,  # No backprop history for this new tensor
+            backend=t1.backend  # Use the same backend
+        )
+        permuted_tensor._tensor.shape = tuple(new_shape)
+        permuted_tensor._tensor.strides = tuple(new_strides)
+
+        return permuted_tensor
+
+    @staticmethod
+    def backward(ctx: Context, grad_output: Tensor) -> Tensor:
+        order_tensor = ctx.saved_values[0]
+        # Extract 'order' from 'order_tensor'
+        order = [int(i.item()) for i in order_tensor]
+
+        # Compute the inverse permutation
+        reverse_order = [order.index(i) for i in range(len(order))]
+
+        # Convert 'reverse_order' to List[float]
+        reverse_order_floats = [float(i) for i in reverse_order]
+        # Create 'reverse_order_tensor' using the list of floats
+        reverse_order_tensor = Tensor.make(reverse_order_floats, (len(reverse_order),), backend=grad_output.backend)
+
+        # Apply Permute with 'reverse_order_tensor'
+        return Permute.apply(grad_output, reverse_order_tensor)
+
 
 class Add(Function):
     @staticmethod
@@ -97,12 +240,11 @@ class Add(Function):
 
 class All(Function):
     @staticmethod
-    def forward(ctx: Context, a: Tensor, dim: Tensor) -> Tensor:
-        """Return 1 if all are true"""
-        if dim is not None:
-            return a.f.mul_reduce(a, int(dim.item()))
-        else:
-            return a.f.mul_reduce(a.contiguous().view(int(operators.prod(a.shape))), 0)
+    def forward(ctx: Context, a: Tensor, dim_tensor: Tensor) -> Tensor:
+        # Convert dim_tensor to int
+        dim = int(dim_tensor.item())
+        ctx.save_for_backward(dim_tensor)
+        return a.f.mul_reduce(a, dim)
 
 
 # TODO: Implement for Task 2.3.
