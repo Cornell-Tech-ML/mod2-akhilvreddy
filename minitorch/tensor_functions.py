@@ -13,6 +13,7 @@ from . import operators
 from .autodiff import Context
 from .tensor_ops import SimpleBackend, TensorBackend
 
+
 if TYPE_CHECKING:
     from typing import Any, List, Tuple
 
@@ -66,11 +67,14 @@ class Function:
 class Neg(Function):
     @staticmethod
     def forward(ctx: Context, t1: Tensor) -> Tensor:
+        ctx.save_for_backward(t1)
         return t1.f.neg_map(t1)
 
     @staticmethod
-    def backward(ctx: Context, grad_output: Tensor) -> Tensor:
-        return grad_output.f.neg_map(grad_output)
+    def backward(ctx: Context, grad_output: Tensor) -> tuple[Tensor]:
+        (t1,) = ctx.saved_values
+        grad_input = -grad_output
+        return (grad_input,)
 
 
 class Inv(Function):
@@ -87,12 +91,16 @@ class Inv(Function):
 class Mul(Function):
     @staticmethod
     def forward(ctx: Context, t1: Tensor, t2: Tensor) -> Tensor:
+        ctx.save_for_backward(t1, t2)
         return t1.f.mul_zip(t1, t2)
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:
-        return grad_output.f.mul_zip(grad_output, ctx.saved_values[1]), grad_output.f.mul_zip(grad_output, ctx.saved_values[0])
-
+        t1, t2 = ctx.saved_values  # Retrieve t1 and t2
+        grad_t1 = grad_output.f.mul_zip(grad_output, t2)  # dL/dt1 = dL/dout * t2
+        grad_t2 = grad_output.f.mul_zip(grad_output, t1)  # dL/dt2 = dL/dout * t1
+        return grad_t1, grad_t2
+    
 class Sigmoid(Function):
     @staticmethod
     def forward(ctx: Context, t1: Tensor) -> Tensor:
@@ -102,9 +110,11 @@ class Sigmoid(Function):
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tensor:
-        sigmoid_output = ctx.saved_values[0]
-        return grad_output.f.mul_zip(sigmoid_output.f.mul_zip(sigmoid_output, sigmoid_output.f.sub_map(1, sigmoid_output)), grad_output)
-
+        (sigmoid_output,) = ctx.saved_values
+        sigmoid_derivative = sigmoid_output.f.mul_zip(sigmoid_output, sigmoid_output.f.sub_map(1, sigmoid_output))
+        grad_input = grad_output.f.mul_zip(sigmoid_derivative, grad_output)
+        return grad_input
+    
 class ReLU(Function):
     @staticmethod
     def forward(ctx: Context, t1: Tensor) -> Tensor:
@@ -112,9 +122,10 @@ class ReLU(Function):
         return t1.f.relu_map(t1)
 
     @staticmethod
-    def backward(ctx: Context, grad_output: Tensor) -> Tensor:
-        t1 = ctx.saved_values[0]
-        return grad_output.f.relu_back_zip(t1, grad_output)
+    def backward(ctx: Context, grad_output: Tensor) -> tuple[Tensor]:
+        (t1,) = ctx.saved_values
+        grad_input = grad_output * (t1.data > 0).astype(float)
+        return (grad_input,)
 
 class Log(Function):
     @staticmethod
@@ -122,16 +133,17 @@ class Log(Function):
         ctx.save_for_backward(t1)
         return t1.f.log_map(t1)
 
-    # @staticmethod
-    # def backward(ctx: Context, grad_output: Tensor) -> Tensor:
-    #     t1 = ctx.saved_values[0]
-    #     return grad_output.f.div_zip(grad_output, t1)
+    @staticmethod
+    def backward(ctx: Context, grad_output: Tensor) -> Tensor:
+        t1 = ctx.saved_values[0]
+        inv_t1 = t1.f.inv_map(t1)
+        return grad_output.f.mul_zip(grad_output, inv_t1)
 
 class Exp(Function):
     @staticmethod
     def forward(ctx: Context, t1: Tensor) -> Tensor:
         result = t1.f.exp_map(t1)
-        ctx.save_for_backward(result)  # Save the result for the backward pass
+        ctx.save_for_backward(result)
         return result
 
     @staticmethod
@@ -143,14 +155,24 @@ class Sum(Function):
     @staticmethod
     def forward(ctx: Context, t1: Tensor, dim_tensor: Tensor) -> Tensor:
         dim = int(dim_tensor.item())
-        ctx.save_for_backward(dim_tensor)
+        ctx.save_for_backward(t1, dim_tensor)
         return t1.f.add_reduce(t1, dim)
 
-    # @staticmethod
-    # def backward(ctx: Context, grad_output: Tensor) -> Tensor:
-    #     dim = ctx.saved_values[0]
-    #     # Expand the grad_output to match the shape of t1 along the reduced dimension
-    #     return grad_output.f.expand_dims(grad_output, dim, ctx.input_shape)
+    @staticmethod
+    def backward(ctx: Context, grad_output: Tensor) -> tuple[Tensor, Tensor]:
+        t1, dim_tensor = ctx.saved_values
+        dim = int(dim_tensor.item())
+        shape = list(t1.shape)
+        shape[dim] = 1
+
+        grad_output_reshaped = grad_output.view(*shape)
+
+        # Use the newly defined `ones` function
+        ones_tensor = ones(t1.shape, backend=t1.backend)
+        grad_input = grad_output_reshaped * ones_tensor
+        zero_grad = zeros(dim_tensor.shape, backend=dim_tensor.backend)
+        return grad_input, zero_grad
+
 
 class LT(Function):
     @staticmethod
@@ -212,19 +234,13 @@ class Permute(Function):
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tensor:
-        order_tensor = ctx.saved_values[0]
-        # Extract 'order' from 'order_tensor'
-        order = [int(i.item()) for i in order_tensor]
-
-        # Compute the inverse permutation
+        order = ctx.saved_values[0]
         reverse_order = [order.index(i) for i in range(len(order))]
-
-        # Convert 'reverse_order' to List[float]
-        reverse_order_floats = [float(i) for i in reverse_order]
-        # Create 'reverse_order_tensor' using the list of floats
-        reverse_order_tensor = Tensor.make(reverse_order_floats, (len(reverse_order),), backend=grad_output.backend)
-
-        # Apply Permute with 'reverse_order_tensor'
+        reverse_order_tensor = minitorch.Tensor.make(
+            [float(i) for i in reverse_order],
+            (len(reverse_order),),
+            backend=grad_output.backend
+        )
         return Permute.apply(grad_output, reverse_order_tensor)
 
 
@@ -241,7 +257,6 @@ class Add(Function):
 class All(Function):
     @staticmethod
     def forward(ctx: Context, a: Tensor, dim_tensor: Tensor) -> Tensor:
-        # Convert dim_tensor to int
         dim = int(dim_tensor.item())
         ctx.save_for_backward(dim_tensor)
         return a.f.mul_reduce(a, dim)
@@ -325,6 +340,21 @@ def zeros(shape: UserShape, backend: TensorBackend = SimpleBackend) -> Tensor:
         [0.0] * int(operators.prod(shape)), shape, backend=backend
     )
 
+def ones(shape: UserShape, backend: TensorBackend = SimpleBackend) -> Tensor:
+    """Produce a tensor of ones of size `shape`.
+
+    Args:
+    ----
+        shape : shape of tensor
+        backend : tensor backend
+
+    Returns:
+    -------
+        new tensor
+    """
+    return minitorch.Tensor.make(
+        [1.0] * int(operators.prod(shape)), shape, backend=backend
+    )
 
 def rand(
     shape: UserShape,
