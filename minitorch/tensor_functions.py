@@ -111,8 +111,11 @@ class Sigmoid(Function):
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tensor:
         (sigmoid_output,) = ctx.saved_values
-        sigmoid_derivative = sigmoid_output.f.mul_zip(sigmoid_output, sigmoid_output.f.sub_map(1, sigmoid_output))
-        grad_input = grad_output.f.mul_zip(sigmoid_derivative, grad_output)
+
+        sigmoid_derivative = sigmoid_output - sigmoid_output * sigmoid_output
+
+        grad_input = grad_output * sigmoid_derivative
+
         return grad_input
     
 class ReLU(Function):
@@ -124,7 +127,8 @@ class ReLU(Function):
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> tuple[Tensor]:
         (t1,) = ctx.saved_values
-        grad_input = grad_output * (t1.data > 0).astype(float)
+        grad_mask = (t1 > 0) * 1.0
+        grad_input = grad_output * grad_mask
         return (grad_input,)
 
 class Log(Function):
@@ -199,51 +203,57 @@ class IsClose(Function):
 
 class Permute(Function):
     @staticmethod
-    def forward(ctx: Context, t1: Tensor, order_tensor: Tensor) -> Tensor:
-        """Permute the dimensions of the tensor according to the specified order.
-
-        Args:
-            t1 (Tensor): The input tensor.
-            order (List[int]): The desired ordering of dimensions.
-
-        Returns:
-            Tensor: A new tensor with permuted dimensions.
-        """
-        # Save the order for the backward pass
-        order = [int(i) for i in order_tensor]
-
+    def forward(ctx: Context, a: Tensor, order: Tensor) -> Tensor:
+        # Save the permutation order for the backward pass
         ctx.save_for_backward(order)
+        
+        # Convert order tensor to a list of integers
+        order_list = [int(order[i]) for i in range(order.shape[0])]
 
-        # Validate the permutation order
-        assert sorted(order) == list(range(len(t1.shape))), "Invalid permutation order"
+        # Validate the permutation order length
+        if len(order_list) != len(a.shape):
+            raise ValueError(f"Permutation order length {len(order_list)} does not match tensor dimensions {len(a.shape)}.")
+        
+        # Validate the permutation indices
+        if sorted(order_list) != list(range(len(a.shape))):
+            raise ValueError(f"Invalid permutation order: {order_list}. Must be a permutation of {list(range(len(a.shape)))}.")
 
-        # Compute new shape and strides
-        new_shape = [t1.shape[i] for i in order]
-        new_strides = [t1._tensor.strides[i] for i in order]
+        # Permute the shape and strides according to the order
+        permuted_shape = tuple(a.shape[i] for i in order_list)
+        permuted_strides = tuple(a._tensor.strides[i] for i in order_list)
 
-        # Create a new Tensor with permuted shape and strides
-        permuted_tensor = Tensor(
-            v=t1._tensor,  # Reuse the same storage as t1
-            back=None,  # No backprop history for this new tensor
-            backend=t1.backend  # Use the same backend
+        # Create the permuted tensor
+        return minitorch.Tensor.make(
+            a._tensor._storage,
+            permuted_shape,
+            permuted_strides,
+            backend=a.backend
         )
-        permuted_tensor._tensor.shape = tuple(new_shape)
-        permuted_tensor._tensor.strides = tuple(new_strides)
-
-        return permuted_tensor
 
     @staticmethod
-    def backward(ctx: Context, grad_output: Tensor) -> Tensor:
-        order = ctx.saved_values[0]
-        reverse_order = [order.index(i) for i in range(len(order))]
-        reverse_order_tensor = minitorch.Tensor.make(
-            [float(i) for i in reverse_order],
-            (len(reverse_order),),
-            backend=grad_output.backend
-        )
-        return Permute.apply(grad_output, reverse_order_tensor)
+    def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:
+        order, = ctx.saved_tensors
 
+        # Initialize the storage for the inverse permutation order
+        inverse_order_storage = [0] * order._tensor.size
 
+        # Compute the inverse permutation
+        for i in range(order._tensor.size):
+            index = int(order._tensor._storage[i])
+            inverse_order_storage[index] = i
+
+        # Create a tensor from the inverse permutation storage
+        inverse_order = tensor(inverse_order_storage, backend=order.backend)
+
+        # Apply the inverse permutation to the gradient output
+        grad_input = Permute.apply(grad_output, inverse_order)
+
+        # Create a zero tensor for the gradient of the permutation order
+        zero_grad = zeros(order.shape, backend=order.backend)
+
+        # Return the gradient for the input tensor and a zero tensor for the order
+        return grad_input, zero_grad
+    
 class Add(Function):
     @staticmethod
     def forward(ctx: Context, t1: Tensor, t2: Tensor) -> Tensor:
