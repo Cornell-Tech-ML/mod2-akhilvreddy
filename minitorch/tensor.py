@@ -95,9 +95,23 @@ class Tensor:
         self.f = backend
 
     def requires_grad_(self, x: bool) -> None:
+        """
+        Sets whether gradients should be computed for this tensor.
+
+        Args:
+            x (bool): If True, gradients will be tracked for this tensor 
+                    during operations. If False, gradients will not be tracked.
+        """
         self.history = History()
 
     def requires_grad(self) -> bool:
+        """
+        Checks if this tensor requires gradient computation.
+
+        Returns:
+            bool: True if gradients are being tracked for this tensor, 
+                otherwise False.
+        """
         return self.history is not None
 
     def to_numpy(self) -> npt.NDArray[np.float64]:
@@ -194,6 +208,16 @@ class Tensor:
         # END CODE CHANGE (2021)
 
     def zeros(self, shape: Optional[UserShape] = None) -> Tensor:
+        """
+        Creates a tensor filled with zeros.
+
+        Args:
+            shape (Optional[UserShape]): The shape of the tensor to create. 
+                                        If None, a default shape will be used.
+
+        Returns:
+            Tensor: A tensor of the specified shape, filled with zeros.
+        """
         def zero(shape: UserShape) -> Tensor:
             return Tensor.make(
                 [0.0] * int(operators.prod(shape)), shape, backend=self.backend
@@ -239,14 +263,45 @@ class Tensor:
         return self.history is not None and self.history.last_fn is None
 
     def is_constant(self) -> bool:
+        """
+        Checks if the tensor is a constant (i.e., does not require gradients).
+
+        Returns:
+            bool: True if the tensor does not track gradients, otherwise False.
+        """
         return self.history is None
 
     @property
     def parents(self) -> Iterable[Variable]:
+        """
+        Returns the parent variables of this tensor in the computation graph.
+
+        Returns:
+            Iterable[Variable]: The inputs to this tensor's operation, which are
+                                considered its parents in the computation graph.
+
+        Raises:
+            AssertionError: If the tensor does not have a computation history.
+        """
         assert self.history is not None
         return self.history.inputs
 
     def chain_rule(self, d_output: Any) -> Iterable[Tuple[Variable, Any]]:
+        """
+        Computes the gradients of the inputs (parents) using the chain rule.
+
+        Args:
+            d_output (Any): The gradient of the output with respect to some 
+                            scalar value (typically the loss).
+
+        Returns:
+            Iterable[Tuple[Variable, Any]]: A collection of tuples, where each 
+                                            tuple contains a parent variable and 
+                                            its corresponding gradient contribution.
+
+        Raises:
+            AssertionError: If the tensor does not have a computation history.
+        """
         h = self.history
         assert h is not None
         assert h.last_fn is not None
@@ -260,6 +315,18 @@ class Tensor:
         ]
 
     def backward(self, grad_output: Optional[Tensor] = None) -> None:
+        """
+        Performs backpropagation to compute gradients for all variables in the computation graph.
+
+        Args:
+            grad_output (Optional[Tensor]): The gradient of the output with respect to 
+                                            the tensor. If None, the gradient is assumed 
+                                            to be 1 for scalar tensors. For non-scalar tensors, 
+                                            `grad_output` must be provided.
+
+        Raises:
+            AssertionError: If `grad_output` is not provided for a non-scalar tensor.
+        """
         if grad_output is None:
             assert self.shape == (1,), "Must provide grad_output if non-scalar"
             grad_output = Tensor.make([1.0], (1,), backend=self.backend)

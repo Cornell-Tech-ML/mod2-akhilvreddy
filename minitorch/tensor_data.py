@@ -212,9 +212,32 @@ class TensorData:
 
     @staticmethod
     def shape_broadcast(shape_a: UserShape, shape_b: UserShape) -> UserShape:
+        """
+        Computes the broadcasted shape from two input shapes.
+
+        Determines the resulting shape when two shapes are broadcasted together,
+        following broadcasting rules similar to those in NumPy.
+
+        Args:
+            shape_a (UserShape): The first shape to broadcast.
+            shape_b (UserShape): The second shape to broadcast.
+
+        Returns:
+            UserShape: The broadcasted shape resulting from combining the two input shapes.
+        """
         return shape_broadcast(shape_a, shape_b)
 
     def index(self, index: Union[int, UserIndex]) -> int:
+        """
+        Converts a multidimensional index or single integer index to a position in the flattened storage.
+
+        Args:
+            index (Union[int, UserIndex]): The index to convert, either as a single integer
+                                        or a multidimensional tuple.
+
+        Returns:
+            int: The corresponding position in the flattened storage array.
+        """
         if isinstance(index, int):
             aindex: Index = array([index])
         else:  # if isinstance(index, tuple):
@@ -238,6 +261,13 @@ class TensorData:
         return index_to_position(array(index), self._strides)
 
     def indices(self) -> Iterable[UserIndex]:
+        """
+        Generates all possible indices for the tensor's shape.
+
+        Yields:
+            Iterable[UserIndex]: An iterator over all valid multidimensional indices
+                                for the tensor, given its shape.
+        """
         lshape: Shape = array(self.shape)
         out_index: Index = array(self.shape)
         for i in range(self.size):
@@ -249,10 +279,26 @@ class TensorData:
         return tuple((random.randint(0, s - 1) for s in self.shape))
 
     def get(self, key: UserIndex) -> float:
+        """
+        Retrieves the value stored at a specific index in the tensor.
+
+        Args:
+            key (UserIndex): The multidimensional index of the element to retrieve.
+
+        Returns:
+            float: The value at the specified index.
+        """
         x: float = self._storage[self.index(key)]
         return x
 
     def set(self, key: UserIndex, val: float) -> None:
+        """
+        Sets the value at a specific index in the tensor.
+
+        Args:
+            key (UserIndex): The multidimensional index where the value should be set.
+            val (float): The value to store at the specified index.
+        """
         self._storage[self.index(key)] = val
 
     def tuple(self) -> Tuple[Storage, Shape, Strides]:
