@@ -15,6 +15,13 @@ class SGD(Optimizer):
         self.lr = lr
 
     def zero_grad(self) -> None:
+        """
+        Resets the gradients of all parameters to zero.
+
+        This method sets the gradients of each parameter in the optimizer
+        to zero, which is useful for clearing old gradients before starting
+        a new optimization step.
+        """
         for p in self.parameters:
             if p.value is None:
                 continue
