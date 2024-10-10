@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Optional, Type
+from typing import TYPE_CHECKING, Callable, Optional, Type, List
 
 import numpy as np
 from typing_extensions import Protocol
@@ -41,7 +41,20 @@ class TensorOps:
     @staticmethod
     def reduce(
         fn: Callable[[float, float], float], start: float = 0.0
-    ) -> Callable[[Tensor, int], Tensor]: ...
+    ) -> Callable[[Tensor, int], Tensor]: 
+        """
+        Creates a reduction function that applies a specified binary operation 
+        across the elements of a tensor along a given dimension.
+
+        Args:
+            fn (Callable[[float, float], float]): The binary function to apply for the reduction.
+            start (float): The initial value for the reduction. Default is 0.0.
+
+        Returns:
+            Callable[[Tensor, int], Tensor]: A function that takes a tensor and a dimension, 
+                                            and returns a new tensor with the reduction applied.
+        """
+        ...
 
     @staticmethod
     def matrix_multiply(a: Tensor, b: Tensor) -> Tensor:
@@ -261,8 +274,36 @@ def tensor_map(
         in_shape: Shape,
         in_strides: Strides,
     ) -> None:
-        # TODO: Implement for Task 2.3.
-        raise NotImplementedError("Need to implement for Task 2.3")
+        
+        out_size: int = 1
+        for dim in out_shape:
+            out_size *= dim
+        
+        def get_index(index: List[int], shape: Shape, strides: Strides) -> int:
+            storage_index: int = 0
+            for i, (idx, stride) in enumerate(zip(index, strides)):
+                storage_index += idx * stride
+            return storage_index
+        
+        def unravel_index(flat_index: int, shape: Shape) -> List[int]:
+            idx: List[int] = []
+            for dim in reversed(shape):
+                idx.append(flat_index % dim)
+                flat_index //= dim
+            return list(reversed(idx))
+        
+        for i in range(out_size):
+            out_idx: List[int] = unravel_index(i, out_shape)
+            
+            in_idx: List[int] = [
+                0 if in_dim == 1 else out_dim
+                for out_dim, in_dim in zip(out_idx, [1] * (len(out_shape) - len(in_shape)) + list(in_shape))
+            ]
+            
+            in_storage_idx: int = get_index(in_idx, in_shape, in_strides)
+            out_storage_idx: int = get_index(out_idx, out_shape, out_strides)
+            
+            out[out_storage_idx] = fn(in_storage[in_storage_idx])
 
     return _map
 
@@ -307,9 +348,47 @@ def tensor_zip(
         b_strides: Strides,
     ) -> None:
         # TODO: Implement for Task 2.3.
-        raise NotImplementedError("Need to implement for Task 2.3")
+               
+        out_size: int = 1
+        for dim in out_shape:
+            out_size *= dim
+        
+        def get_index(index: List[int], shape: Shape, strides: Strides) -> int:
+            storage_index: int = 0
+            for i, (idx, stride) in enumerate(zip(index, strides)):
+                storage_index += idx * stride
+            return storage_index
+        
+        def unravel_index(flat_index: int, shape: Shape) -> List[int]:
+            idx: List[int] = []
+            for dim in reversed(shape):
+                idx.append(flat_index % dim)
+                flat_index //= dim
+            return list(reversed(idx))
+        
+        for i in range(out_size):
+            out_idx: List[int] = unravel_index(i, out_shape)
+            
+            a_idx: List[int] = [
+                0 if a_dim == 1 else out_dim
+                for out_dim, a_dim in zip(out_idx, [1] * (len(out_shape) - len(a_shape)) + list(a_shape))
+            ]
+            
+            b_idx: List[int] = [
+                0 if b_dim == 1 else out_dim
+                for out_dim, b_dim in zip(out_idx, [1] * (len(out_shape) - len(b_shape)) + list(b_shape))
+            ]
+            
+            a_storage_idx: int = get_index(a_idx, a_shape, a_strides)
+            b_storage_idx: int = get_index(b_idx, b_shape, b_strides)
+            out_storage_idx: int = get_index(out_idx, out_shape, out_strides)
+            
+            out[out_storage_idx] = fn(a_storage[a_storage_idx], b_storage[b_storage_idx])
 
     return _zip
+    #raise NotImplementedError("Need to implement for Task 2.3")
+
+    
 
 
 def tensor_reduce(
@@ -338,9 +417,43 @@ def tensor_reduce(
         reduce_dim: int,
     ) -> None:
         # TODO: Implement for Task 2.3.
-        raise NotImplementedError("Need to implement for Task 2.3")
+
+        out_size: int = 1
+        for dim in out_shape:
+            out_size *= dim
+
+        def get_index(index: List[int], shape: Shape, strides: Strides) -> int:
+            storage_index: int = 0
+            for i, (idx, stride) in enumerate(zip(index, strides)):
+                storage_index += idx * stride
+            return storage_index
+
+        def unravel_index(flat_index: int, shape: Shape) -> List[int]:
+            idx: List[int] = []
+            for dim in reversed(shape):
+                idx.append(flat_index % dim)
+                flat_index //= dim
+            return list(reversed(idx))
+
+        for i in range(out_size):
+            out_idx: List[int] = unravel_index(i, out_shape)
+
+            a_idx: List[int] = out_idx.copy()
+            a_idx[reduce_dim] = 0
+
+            out_storage_idx: int = get_index(out_idx, out_shape, out_strides)
+            a_storage_idx: int = get_index(a_idx, a_shape, a_strides)
+            result: float = a_storage[a_storage_idx]
+
+            for j in range(1, a_shape[reduce_dim]):
+                a_idx[reduce_dim] = j
+                a_storage_idx = get_index(a_idx, a_shape, a_strides)
+                result = fn(result, a_storage[a_storage_idx])
+
+            out[out_storage_idx] = result
 
     return _reduce
 
+    #raise NotImplementedError("Need to implement for Task 2.3")
 
 SimpleBackend = TensorBackend(SimpleOps)
