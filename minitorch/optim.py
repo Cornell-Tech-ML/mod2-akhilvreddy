@@ -15,8 +15,7 @@ class SGD(Optimizer):
         self.lr = lr
 
     def zero_grad(self) -> None:
-        """
-        Resets the gradients of all parameters to zero.
+        """Resets the gradients of all parameters to zero.
 
         This method sets the gradients of each parameter in the optimizer
         to zero, which is useful for clearing old gradients before starting
@@ -33,11 +32,10 @@ class SGD(Optimizer):
                     p.value.grad = None
 
     def step(self) -> None:
-        """
-        Performs a single optimization step.
+        """Performs a single optimization step.
 
-        This method updates the values of all parameters based on their 
-        gradients and the learning rate. It should be called after computing 
+        This method updates the values of all parameters based on their
+        gradients and the learning rate. It should be called after computing
         the gradients during the optimization process.
         """
         for p in self.parameters:
