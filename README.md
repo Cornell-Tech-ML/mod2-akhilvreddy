@@ -24,7 +24,7 @@ The files that will be synced are:
 ---------------------------------------------------------
 <img src="pictures/simple/simple1.png" width="100%">
 <img src="pictures/simple/simple2.png" width="100%">
-<img src="pictures/simple/simple2.png" width="100%">
+<img src="pictures/simple/simple3.png" width="100%">
 ---------------------------------------------------------
 
 ## Diag
